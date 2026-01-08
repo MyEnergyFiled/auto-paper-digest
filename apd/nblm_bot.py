@@ -238,42 +238,58 @@ class NotebookLMBot:
             if "notebooklm.google" in current_url and "accounts.google" not in current_url:
                 logger.info("Login detected, waiting for UI...")
                 try:
+                    # Wait for page to fully load
+                    self.page.wait_for_load_state("networkidle", timeout=10000)
+                    
                     # Use multiple detection strategies for robustness
-                    # Strategy 1: Check for page URL pattern (most reliable)
-                    if "/app" in current_url or current_url.endswith("notebooklm.google.com/"):
-                        # Wait for page to fully load
-                        self.page.wait_for_load_state("networkidle", timeout=10000)
+                    ui_loaded = False
+                    
+                    # Strategy 1: Look for notebook list/create button text in any language
+                    for text_pattern in ["我的笔记本", "My notebooks", "新建笔记本", "新建", 
+                                        "Create", "New notebook", "精选笔记本"]:
+                        try:
+                            elem = self.page.get_by_text(text_pattern, exact=False).first
+                            if elem.is_visible(timeout=2000):
+                                ui_loaded = True
+                                logger.debug(f"Found UI element with text: {text_pattern}")
+                                break
+                        except Exception:
+                            continue
+                    
+                    # Strategy 2: Check for notebook cards (mat-card elements)
+                    if not ui_loaded:
+                        try:
+                            cards = self.page.locator('mat-card').count()
+                            if cards > 0:
+                                ui_loaded = True
+                                logger.debug(f"Found {cards} notebook card(s)")
+                        except Exception:
+                            pass
+                    
+                    # Strategy 3: Check for any notebook-related buttons
+                    if not ui_loaded:
+                        try:
+                            buttons = self.page.locator('button').count()
+                            if buttons > 5:  # Page has multiple interactive elements
+                                ui_loaded = True
+                                logger.debug(f"Found {buttons} buttons")
+                        except Exception:
+                            pass
+                    
+                    # Strategy 4: Check for "全部" (All) tab which is on the home page
+                    if not ui_loaded:
+                        try:
+                            tab = self.page.get_by_text("全部", exact=True)
+                            if tab.count() > 0 and tab.first.is_visible():
+                                ui_loaded = True
+                                logger.debug("Found '全部' tab")
+                        except Exception:
+                            pass
+                    
+                    if ui_loaded:
+                        logger.info("Login successful!")
+                        return True
                         
-                        # Strategy 2: Look for common UI elements using get_by_text (better for i18n)
-                        # Check for notebook-related text in any language
-                        ui_loaded = False
-                        
-                        # Try to find notebook list or create button
-                        for text_pattern in ["我的笔记本", "My notebooks", "新建", "Create", "New notebook"]:
-                            try:
-                                elem = self.page.get_by_text(text_pattern, exact=False).first
-                                if elem.is_visible(timeout=2000):
-                                    ui_loaded = True
-                                    logger.debug(f"Found UI element with text: {text_pattern}")
-                                    break
-                            except Exception:
-                                continue
-                        
-                        # Strategy 3: Check for any notebook cards (they have specific structure)
-                        if not ui_loaded:
-                            try:
-                                # Look for notebook grid/list or settings button
-                                notebook_elems = self.page.locator('[role="button"], [role="listitem"], button').count()
-                                if notebook_elems > 3:  # Page has interactive elements
-                                    ui_loaded = True
-                                    logger.debug(f"Found {notebook_elems} interactive elements")
-                            except Exception:
-                                pass
-                        
-                        if ui_loaded:
-                            logger.info("Login successful!")
-                            return True
-                            
                 except PlaywrightTimeout:
                     logger.debug("Timeout waiting for UI elements, continuing to poll...")
                 except Exception as e:
@@ -732,24 +748,70 @@ class NotebookLMBot:
         self.take_screenshot("video_timeout")
         return False
     
-    def download_video(self, save_path: Path) -> Optional[Path]:
+    def _get_artifact_title(self) -> Optional[str]:
+        """
+        Get the title of the generated video/audio artifact from the Studio panel.
+        
+        Returns:
+            The artifact title, or None if not found
+        """
+        try:
+            # Look for artifact button content which contains the title
+            artifact = self.page.locator('.artifact-button-content')
+            if artifact.count() > 0:
+                # The title is in a span inside the button
+                title_elem = artifact.first.locator('span').first
+                if title_elem.count() > 0:
+                    title = title_elem.text_content()
+                    if title:
+                        # Clean up the title for use as filename
+                        return title.strip()
+            
+            # Fallback: look for generated item with timestamp
+            items = self.page.locator('[class*="artifact"]')
+            for i in range(min(3, items.count())):
+                text = items.nth(i).text_content()
+                if text and ("分钟" in text or "小时" in text or "刚刚" in text):
+                    # Extract title (first part before the timestamp info)
+                    lines = text.strip().split('\n')
+                    if lines:
+                        return lines[0].strip()
+        except Exception as e:
+            logger.debug(f"Failed to get artifact title: {e}")
+        
+        return None
+    
+    def download_video(self, paper_id: str, video_dir: Path) -> Optional[Path]:
         """
         Download the generated video.
         
         In the new NotebookLM UI, download is accessed via the three-dot menu
         on the generated item, then clicking "下载" (Download).
         
+        The video is saved with filename format: {paper_id}_{video_title}.mp4
+        
         Args:
-            save_path: Path to save the video file
+            paper_id: The paper ID (used as filename prefix)
+            video_dir: Directory to save the video file
             
         Returns:
             Path to downloaded video, or None on failure
         """
-        logger.info(f"Downloading video to: {save_path}")
-        
         try:
             # Ensure directory exists
-            ensure_dir(save_path.parent)
+            ensure_dir(video_dir)
+            
+            # Get the artifact title for the filename
+            artifact_title = self._get_artifact_title()
+            if artifact_title:
+                # Sanitize the title for use as filename
+                safe_title = sanitize_filename(artifact_title)
+                save_path = video_dir / f"{paper_id}_{safe_title}.mp4"
+            else:
+                # Fallback to paper_id only
+                save_path = video_dir / f"{paper_id}.mp4"
+            
+            logger.info(f"Downloading video to: {save_path}")
             
             # First, scroll the Studio panel to reveal generated items
             try:
@@ -957,9 +1019,8 @@ class NotebookLMBot:
             
             # Download video
             video_dir = ensure_dir(VIDEO_DIR / week_id)
-            video_path = video_dir / f"{paper_id}.mp4"
             
-            result = self.download_video(video_path)
+            result = self.download_video(paper_id, video_dir)
             if not result:
                 update_status(paper_id, Status.ERROR, "Failed to download video")
                 return False
@@ -968,7 +1029,7 @@ class NotebookLMBot:
             upsert_paper(
                 paper_id=paper_id,
                 week_id=week_id,
-                video_path=str(video_path),
+                video_path=str(result),
                 status=Status.VIDEO_OK
             )
             
@@ -1155,7 +1216,8 @@ def download_videos_for_week(
     week_id: str,
     headless: bool = True,
     max_papers: Optional[int] = None,
-) -> tuple[int, int]:
+    force: bool = False,
+) -> tuple[int, int, int]:
     """
     Download generated videos for a week from NotebookLM.
     
@@ -1165,32 +1227,60 @@ def download_videos_for_week(
     3. For each notebook, check if video is ready
     4. If ready, download the video
     
+    Implements caching: if video file already exists, skip download unless force=True.
+    
     Args:
         week_id: Week identifier (e.g., "2026-02")
         headless: Run browser in headless mode
         max_papers: Maximum papers to process
+        force: Force re-download even if video exists
         
     Returns:
-        Tuple of (success_count, failure_count)
+        Tuple of (success_count, failure_count, skipped_count)
     """
     from .db import list_papers
     
-    # Get papers that have been uploaded but video not yet downloaded
-    papers = list_papers(week_id=week_id, status=Status.NBLM_OK)
+    # Get papers that have been uploaded (NBLM_OK) or already have video (VIDEO_OK if force)
+    papers_nblm = list_papers(week_id=week_id, status=Status.NBLM_OK)
+    papers_video = list_papers(week_id=week_id, status=Status.VIDEO_OK) if force else []
+    
+    papers = papers_nblm + papers_video
     
     if max_papers:
         papers = papers[:max_papers]
     
     if not papers:
         logger.info(f"No papers awaiting video download in week {week_id}")
-        return 0, 0
+        return 0, 0, 0
     
     success = 0
     failure = 0
+    skipped = 0
     
     with NotebookLMBot(headless=headless) as bot:
         for paper in papers:
             notebook_name = paper.notebooklm_note_name or f"{week_id}_{paper.paper_id}"
+            
+            # Check if video already exists (caching) using prefix matching
+            video_dir = ensure_dir(VIDEO_DIR / week_id)
+            
+            # Find any existing video file with this paper_id as prefix
+            existing_videos = list(video_dir.glob(f"{paper.paper_id}_*.mp4"))
+            # Also check for legacy format without title
+            legacy_video = video_dir / f"{paper.paper_id}.mp4"
+            if legacy_video.exists():
+                existing_videos.append(legacy_video)
+            
+            if existing_videos and not force:
+                # Use the first (or only) existing video
+                existing_video = existing_videos[0]
+                file_size = existing_video.stat().st_size
+                if file_size > 1024:  # More than 1KB (valid video)
+                    logger.info(f"Video already exists for {paper.paper_id} ({existing_video.name}, {file_size / 1024 / 1024:.1f} MB), skipping")
+                    skipped += 1
+                    continue
+                else:
+                    logger.warning(f"Video file for {paper.paper_id} is too small ({file_size} bytes), will re-download")
             
             try:
                 logger.info(f"Downloading video for: {paper.paper_id}")
@@ -1319,19 +1409,18 @@ def download_videos_for_week(
                 
                 # Download video
                 video_dir = ensure_dir(VIDEO_DIR / week_id)
-                video_path = video_dir / f"{paper.paper_id}.mp4"
                 
-                result = bot.download_video(video_path)
+                result = bot.download_video(paper.paper_id, video_dir)
                 if not result:
                     logger.error(f"Failed to download video for {paper.paper_id}")
                     failure += 1
                     continue
                 
-                # Update status to VIDEO_OK
+                # Update status to VIDEO_OK with actual downloaded path
                 upsert_paper(
                     paper_id=paper.paper_id,
                     week_id=week_id,
-                    video_path=str(video_path),
+                    video_path=str(result),
                     status=Status.VIDEO_OK
                 )
                 
@@ -1344,5 +1433,5 @@ def download_videos_for_week(
                 bot.take_screenshot(f"download_error_{paper.paper_id}")
                 failure += 1
     
-    logger.info(f"Download complete for week {week_id}: {success} success, {failure} failed")
-    return success, failure
+    logger.info(f"Download complete for week {week_id}: {success} success, {failure} failed, {skipped} skipped")
+    return success, failure, skipped

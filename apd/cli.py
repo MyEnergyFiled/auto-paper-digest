@@ -402,10 +402,16 @@ def upload(
     type=int,
     help="Maximum papers to process"
 )
+@click.option(
+    "--force", "-f",
+    is_flag=True,
+    help="Force re-download even if video already exists"
+)
 def download_video(
     week: Optional[str],
     headful: bool,
-    max_papers: Optional[int]
+    max_papers: Optional[int],
+    force: bool
 ) -> None:
     """
     Download generated videos from NotebookLM.
@@ -427,22 +433,34 @@ def download_video(
     try:
         # Check how many papers are awaiting download
         awaiting = count_papers(week_id=week_id, status=Status.NBLM_OK)
-        if awaiting == 0:
+        video_ok = count_papers(week_id=week_id, status=Status.VIDEO_OK)
+        
+        if awaiting == 0 and (video_ok == 0 or not force):
             click.echo(f"⚠️  No papers awaiting video download in week {week_id}")
-            click.echo("   Run 'apd upload' first to upload PDFs to NotebookLM.")
+            if video_ok > 0:
+                click.echo(f"   ({video_ok} videos already downloaded. Use --force to re-download)")
+            else:
+                click.echo("   Run 'apd upload' first to upload PDFs to NotebookLM.")
             return
         
-        click.echo(f"📥 Downloading videos for {awaiting} papers in week {week_id}...")
+        total = awaiting + (video_ok if force else 0)
+        click.echo(f"📥 Downloading videos for {total} papers in week {week_id}...")
+        if force and video_ok > 0:
+            click.echo(f"   (--force: will re-check {video_ok} already downloaded videos)")
         click.echo()
         
-        success, failure = download_videos_for_week(
+        success, failure, skipped = download_videos_for_week(
             week_id=week_id,
             headless=headless,
-            max_papers=max_papers
+            max_papers=max_papers,
+            force=force
         )
         
         click.echo()
-        click.echo(f"✅ Download complete: {success} success, {failure} failed")
+        result_msg = f"✅ Download complete: {success} success, {failure} failed"
+        if skipped > 0:
+            result_msg += f", {skipped} skipped (already downloaded)"
+        click.echo(result_msg)
         if failure > 0:
             click.echo()
             click.echo("💡 Some videos may still be generating. Try again later.")
@@ -722,5 +740,100 @@ def login() -> None:
                 sys.exit(1)
 
 
+# =============================================================================
+# Publish Command (Phase 3)
+# =============================================================================
+
+@main.command()
+@click.option(
+    "--week", "-w",
+    default=None,
+    help="Week ID (e.g., 2026-01). Defaults to current week."
+)
+@click.option(
+    "--force", "-f",
+    is_flag=True,
+    help="Force re-upload even if already published"
+)
+@click.option(
+    "--digest-only",
+    is_flag=True,
+    help="Only generate digest markdown, don't upload videos"
+)
+def publish(
+    week: Optional[str],
+    force: bool,
+    digest_only: bool
+) -> None:
+    """
+    Publish videos to HuggingFace and generate digest.
+    
+    Phase 3 of the workflow:
+    1. Upload videos to HuggingFace Dataset
+    2. Update metadata.json with video links
+    3. Generate markdown digest with embedded video links
+    
+    Requires HF_TOKEN and HF_USERNAME in .env file.
+    """
+    from .publisher import (
+        generate_digest_markdown,
+        get_hf_dataset_id,
+        publish_week,
+    )
+    
+    logger = get_logger()
+    week_id = week or get_current_week_id()
+    
+    try:
+        dataset_id = get_hf_dataset_id()
+        click.echo(f"🚀 Publishing videos for week {week_id}")
+        click.echo(f"   Dataset: {dataset_id}")
+        click.echo()
+        
+        if not digest_only:
+            # Upload videos
+            click.echo("=" * 50)
+            click.echo("📤 Uploading videos to HuggingFace...")
+            
+            success, failure = publish_week(week_id, force=force)
+            
+            click.echo(f"   Uploaded: {success} success, {failure} failed")
+            
+            if success == 0 and failure == 0:
+                click.echo("⚠️  No videos to publish. Run 'apd download-video' first.")
+                return
+        
+        # Generate digest
+        click.echo()
+        click.echo("=" * 50)
+        click.echo("📝 Generating digest markdown...")
+        
+        try:
+            md_path = generate_digest_markdown(week_id)
+            click.echo(f"   Generated: {md_path}")
+        except ValueError as e:
+            click.echo(f"⚠️  {e}")
+            click.echo("   Digest generation skipped.")
+            return
+        
+        # Summary
+        click.echo()
+        click.echo("=" * 50)
+        click.echo("🎉 Publish complete!")
+        click.echo()
+        click.echo(f"   📺 Videos: https://huggingface.co/datasets/{dataset_id}")
+        click.echo(f"   📄 Digest: {md_path}")
+        
+    except ValueError as e:
+        click.echo(f"❌ Configuration error: {e}", err=True)
+        click.echo("   Please check your .env file.", err=True)
+        sys.exit(1)
+    except Exception as e:
+        logger.exception("Publish failed")
+        click.echo(f"❌ Error: {e}", err=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
+

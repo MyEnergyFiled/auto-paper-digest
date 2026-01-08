@@ -30,9 +30,10 @@ DEFAULT_PROFILE = "default"
 # URLs
 # =============================================================================
 
-# Hugging Face papers page (date-based)
+# Hugging Face papers page (date-based and week-based)
 HF_PAPERS_URL = "https://huggingface.co/papers"
 HF_PAPERS_DATE_URL = "https://huggingface.co/papers?date={date}"
+HF_PAPERS_WEEK_URL = "https://huggingface.co/papers/week/{week}"  # e.g., /week/2026-W01
 
 # arXiv PDF download template
 ARXIV_PDF_URL = "https://arxiv.org/pdf/{paper_id}.pdf"
