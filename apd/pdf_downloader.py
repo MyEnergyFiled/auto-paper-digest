@@ -5,6 +5,7 @@ Downloads arXiv PDFs with idempotency checks via SHA256 hashing.
 """
 
 from pathlib import Path
+import time
 from typing import Optional
 
 import requests
@@ -12,6 +13,7 @@ import requests
 from .config import (
     ARXIV_PDF_URL,
     DOWNLOAD_CHUNK_SIZE,
+    DOWNLOAD_DELAY_SECONDS,
     PDF_DIR,
     REQUEST_TIMEOUT,
     Status,
@@ -139,12 +141,17 @@ def download_pdfs_for_week(
     success = 0
     failure = 0
     
-    for paper in papers:
+    for idx, paper in enumerate(papers):
         # Skip if already downloaded (unless force)
         if paper.status in [Status.PDF_OK, Status.NBLM_OK, Status.VIDEO_OK] and not force:
             logger.debug(f"Skipping {paper.paper_id} - already has status {paper.status}")
             success += 1
             continue
+        
+        # Add delay between downloads to respect arXiv rate limits (skip for first paper)
+        if idx > 0:
+            logger.debug(f"Waiting {DOWNLOAD_DELAY_SECONDS} seconds before next download...")
+            time.sleep(DOWNLOAD_DELAY_SECONDS)
         
         result = download_pdf(paper.paper_id, week_id, force=force)
         if result:

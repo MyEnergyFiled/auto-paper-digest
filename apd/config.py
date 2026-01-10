@@ -36,7 +36,7 @@ HF_PAPERS_DATE_URL = "https://huggingface.co/papers?date={date}"
 HF_PAPERS_WEEK_URL = "https://huggingface.co/papers/week/{week}"  # e.g., /week/2026-W01
 
 # arXiv PDF download template
-ARXIV_PDF_URL = "https://arxiv.org/pdf/{paper_id}.pdf"
+ARXIV_PDF_URL = "https://export.arxiv.org/pdf/{paper_id}.pdf"
 
 # NotebookLM
 NOTEBOOKLM_URL = "https://notebooklm.google.com"
@@ -56,6 +56,9 @@ REQUEST_TIMEOUT = 60
 
 # Download chunk size
 DOWNLOAD_CHUNK_SIZE = 8192
+
+# Delay between downloads (seconds) to respect arXiv rate limits
+DOWNLOAD_DELAY_SECONDS = 3
 
 # Playwright timeouts (milliseconds)
 PLAYWRIGHT_TIMEOUT = 60000  # 60 seconds for general operations
