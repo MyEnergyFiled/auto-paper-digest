@@ -1112,6 +1112,7 @@ def upload_papers_for_week(
     week_id: str,
     headless: bool = True,
     max_papers: Optional[int] = None,
+    force: bool = False,
 ) -> tuple[int, int]:
     """
     Upload all PDFs for a week to NotebookLM and trigger video generation.
@@ -1126,13 +1127,22 @@ def upload_papers_for_week(
         week_id: Week identifier (e.g., "2026-02")
         headless: Run browser in headless mode
         max_papers: Maximum papers to process
+        force: Force re-upload even if already done (process PDF_OK, NBLM_OK, VIDEO_OK)
         
     Returns:
         Tuple of (success_count, failure_count)
     """
     from .db import list_papers
     
-    papers = list_papers(week_id=week_id, status=Status.PDF_OK)
+    if force:
+        # When force is True, get all papers regardless of status
+        papers_pdf = list_papers(week_id=week_id, status=Status.PDF_OK)
+        papers_nblm = list_papers(week_id=week_id, status=Status.NBLM_OK)
+        papers_video = list_papers(week_id=week_id, status=Status.VIDEO_OK)
+        papers = papers_pdf + papers_nblm + papers_video
+    else:
+        # Only process papers with PDF_OK status
+        papers = list_papers(week_id=week_id, status=Status.PDF_OK)
     
     if max_papers:
         papers = papers[:max_papers]

@@ -300,10 +300,16 @@ def nblm(
     type=int,
     help="Maximum papers to process (default: 10)"
 )
+@click.option(
+    "--force", "-f",
+    is_flag=True,
+    help="Force re-processing even if already done"
+)
 def upload(
     week: Optional[str],
     headful: bool,
-    max_papers: int
+    max_papers: int,
+    force: bool
 ) -> None:
     """
     Phase 1: Fetch papers, download PDFs, upload to NotebookLM, trigger video generation.
@@ -317,6 +323,8 @@ def upload(
     
     After this completes, wait a few minutes for videos to generate,
     then run 'apd download-video' to download them.
+    
+    Use --force to re-process papers that have already been uploaded.
     """
     from .hf_fetcher import fetch_weekly_papers
     from .nblm_bot import upload_papers_for_week
@@ -328,6 +336,8 @@ def upload(
     
     click.echo(f"🚀 Phase 1: Upload pipeline for week {week_id}")
     click.echo(f"   Max papers: {max_papers}")
+    if force:
+        click.echo(f"   Force mode: ON (will re-process already uploaded papers)")
     click.echo()
     
     try:
@@ -346,7 +356,7 @@ def upload(
         click.echo("=" * 50)
         click.echo("📄 Step 2: Downloading PDFs from arXiv...")
         dl_success, dl_failure = download_pdfs_for_week(
-            week_id, max_papers=max_papers
+            week_id, force=force, max_papers=max_papers
         )
         click.echo(f"   Downloads: {dl_success} success, {dl_failure} failed")
         
@@ -359,7 +369,8 @@ def upload(
         success, failure = upload_papers_for_week(
             week_id=week_id,
             headless=headless,
-            max_papers=max_papers
+            max_papers=max_papers,
+            force=force
         )
         
         # Summary
