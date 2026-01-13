@@ -13,7 +13,7 @@ from typing import Optional
 from dotenv import load_dotenv
 from huggingface_hub import HfApi, hf_hub_download, upload_file
 
-from .config import DIGEST_DIR, VIDEO_DIR, Status
+from .config import DIGEST_DIR, SLIDES_DIR, VIDEO_DIR, Status
 from .db import list_papers
 from .utils import get_logger
 
@@ -223,6 +223,20 @@ def publish_week(
             remote_path = f"{week_id}/{video_path.name}"
             video_url = upload_video_to_hf(video_path, remote_path, dataset_id)
             
+            # Try to upload slides if available
+            slides_url = None
+            if paper.slides_path:
+                slides_path = Path(paper.slides_path)
+                if slides_path.exists():
+                    remote_slides_path = f"{week_id}/{slides_path.name}"
+                    try:
+                        slides_url = upload_video_to_hf(slides_path, remote_slides_path, dataset_id)
+                        logger.info(f"Uploaded slides: {slides_url}")
+                    except Exception as e:
+                        logger.warning(f"Failed to upload slides for {paper.paper_id}: {e}")
+                else:
+                    logger.debug(f"Slides file not found: {slides_path}")
+            
             # Add to metadata
             paper_data = {
                 "paper_id": paper.paper_id,
@@ -231,6 +245,7 @@ def publish_week(
                 "hf_url": f"https://huggingface.co/papers/{paper.paper_id}",
                 "video_url": video_url,
                 "video_filename": video_path.name,
+                "slides_url": slides_url,
                 "published_at": datetime.now().isoformat(),
             }
             

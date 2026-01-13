@@ -33,6 +33,7 @@ class Paper:
     pdf_sha256: Optional[str] = None
     notebooklm_note_name: Optional[str] = None
     video_path: Optional[str] = None
+    slides_path: Optional[str] = None
     status: str = Status.NEW
     retry_count: int = 0
     last_error: Optional[str] = None
@@ -81,12 +82,19 @@ def init_db() -> None:
                 pdf_sha256 TEXT,
                 notebooklm_note_name TEXT,
                 video_path TEXT,
+                slides_path TEXT,
                 status TEXT DEFAULT 'NEW',
                 retry_count INTEGER DEFAULT 0,
                 last_error TEXT,
                 updated_at TEXT
             )
         """)
+        
+        # Add slides_path column if it doesn't exist (migration for existing databases)
+        try:
+            cursor.execute("ALTER TABLE papers ADD COLUMN slides_path TEXT")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
         
         # Create indexes for common queries
         cursor.execute("""
@@ -139,6 +147,7 @@ def upsert_paper(
     pdf_sha256: Optional[str] = None,
     notebooklm_note_name: Optional[str] = None,
     video_path: Optional[str] = None,
+    slides_path: Optional[str] = None,
     status: Optional[str] = None,
     last_error: Optional[str] = None,
 ) -> Paper:
@@ -187,6 +196,9 @@ def upsert_paper(
             if video_path is not None:
                 updates.append("video_path = ?")
                 values.append(video_path)
+            if slides_path is not None:
+                updates.append("slides_path = ?")
+                values.append(slides_path)
             if status is not None:
                 updates.append("status = ?")
                 values.append(status)
@@ -208,17 +220,18 @@ def upsert_paper(
             cursor.execute("""
                 INSERT INTO papers (
                     paper_id, week_id, title, hf_url, pdf_url, pdf_path,
-                    pdf_sha256, notebooklm_note_name, video_path, status,
+                    pdf_sha256, notebooklm_note_name, video_path, slides_path, status,
                     retry_count, last_error, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 paper_id, week_id, title, hf_url, pdf_url, pdf_path,
-                pdf_sha256, notebooklm_note_name, video_path,
+                pdf_sha256, notebooklm_note_name, video_path, slides_path,
                 status or Status.NEW, 0, last_error, now
             ))
             logger.debug(f"Inserted paper: {paper_id}")
     
     return get_paper(paper_id)  # type: ignore
+
 
 
 def update_status(

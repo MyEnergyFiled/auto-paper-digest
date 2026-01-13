@@ -17,6 +17,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 # Data subdirectories
 PDF_DIR = DATA_DIR / "pdfs"
 VIDEO_DIR = DATA_DIR / "videos"
+SLIDES_DIR = DATA_DIR / "slides"
 DIGEST_DIR = DATA_DIR / "digests"
 PROFILE_DIR = DATA_DIR / "profiles"
 
@@ -88,5 +89,5 @@ class Status:
 
 def ensure_directories() -> None:
     """Create all required directories if they don't exist."""
-    for directory in [PDF_DIR, VIDEO_DIR, DIGEST_DIR, PROFILE_DIR]:
+    for directory in [PDF_DIR, VIDEO_DIR, SLIDES_DIR, DIGEST_DIR, PROFILE_DIR]:
         directory.mkdir(parents=True, exist_ok=True)

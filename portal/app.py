@@ -42,6 +42,7 @@ def show_papers(week):
     
     for i, p in enumerate(papers, 1):
         video_url = p.get('video_url', '')
+        slides_url = p.get('slides_url', '')
         
         # Create embedded video player HTML if video exists
         video_html = ""
@@ -56,6 +57,15 @@ def show_papers(week):
 </video>
 """
         
+        # Create slides download link if available
+        slides_html = ""
+        if slides_url:
+            if '/blob/' in slides_url:
+                slides_url = slides_url.replace('/blob/', '/resolve/')
+            slides_html = f"""
+<p><a href="{slides_url}" target="_blank" style="display:inline-block; padding:8px 16px; background:#10b981; color:white; border-radius:6px; text-decoration:none; margin:10px 0;">📊 Download Slides (PDF)</a></p>
+"""
+        
         result += f"""
 ## {i}. {p.get('title', 'Untitled')}
 
@@ -64,7 +74,7 @@ def show_papers(week):
 [📄 PDF]({p.get('pdf_url', '#')}) | [🤗 HuggingFace Paper]({p.get('hf_url', '#')})
 
 {video_html}
-
+{slides_html}
 ---
 """
     return result

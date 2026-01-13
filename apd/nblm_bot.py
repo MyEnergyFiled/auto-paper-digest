@@ -29,6 +29,7 @@ from .config import (
     PLAYWRIGHT_TIMEOUT,
     PLAYWRIGHT_VIDEO_TIMEOUT,
     PROFILE_DIR,
+    SLIDES_DIR,
     Status,
     VIDEO_DIR,
 )
@@ -628,6 +629,75 @@ class NotebookLMBot:
             self.take_screenshot("generate_failed")
             return False
     
+    def generate_slides(self) -> bool:
+        """
+        Generate a PDF presentation (slides).
+        
+        In the new NotebookLM UI, clicking the "演示文稿" (Slides/Presentation) card
+        directly triggers generation.
+        
+        Returns:
+            True if generation started successfully
+        """
+        logger.info("Starting Slides/Presentation generation...")
+        
+        try:
+            # Wait for page to stabilize
+            time.sleep(2)
+            
+            # Method 1: Click on the "演示文稿" (Slides) card
+            try:
+                slides_card = self.page.get_by_text("演示文稿", exact=True)
+                if slides_card.count() > 0 and slides_card.first.is_visible():
+                    slides_card.first.click()
+                    time.sleep(1)
+                    logger.info("Clicked on 演示文稿 card")
+                    
+                    # Check if a dialog appeared asking for customization
+                    try:
+                        generate_btn = self.page.get_by_role("button", name="生成")
+                        if generate_btn.count() > 0 and generate_btn.first.is_visible():
+                            generate_btn.first.click()
+                            logger.info("Clicked 生成 button in dialog")
+                    except Exception:
+                        pass  # No dialog, generation started directly
+                    
+                    logger.info("Slides generation started")
+                    return True
+            except Exception as e:
+                logger.debug(f"Failed to click 演示文稿: {e}")
+            
+            # Method 2: Try English text
+            try:
+                slides_card_en = self.page.get_by_text("Slides", exact=True)
+                if slides_card_en.count() > 0 and slides_card_en.first.is_visible():
+                    slides_card_en.first.click()
+                    time.sleep(1)
+                    logger.info("Slides generation started (English)")
+                    return True
+            except Exception:
+                pass
+            
+            # Method 3: Try "Presentation"
+            try:
+                pres_card = self.page.get_by_text("Presentation", exact=True)
+                if pres_card.count() > 0 and pres_card.first.is_visible():
+                    pres_card.first.click()
+                    time.sleep(1)
+                    logger.info("Presentation generation started")
+                    return True
+            except Exception:
+                pass
+            
+            logger.error("Could not find Slides/演示文稿 card to click")
+            self.take_screenshot("slides_card_not_found")
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to start slides generation: {e}")
+            self.take_screenshot("slides_generate_failed")
+            return False
+    
     def rename_notebook(self, new_name: str) -> bool:
         """
         Rename the current notebook.
@@ -943,6 +1013,118 @@ class NotebookLMBot:
             self.take_screenshot("download_failed")
             return None
     
+    def download_slides(self, paper_id: str, slides_dir: Path) -> Optional[Path]:
+        """
+        Download the generated PDF slides/presentation.
+        
+        Similar to download_video but for PDF artifacts.
+        The slides are saved with filename format: {paper_id}_slides.pdf
+        
+        Args:
+            paper_id: The paper ID (used as filename prefix)
+            slides_dir: Directory to save the PDF file
+            
+        Returns:
+            Path to downloaded PDF, or None on failure
+        """
+        try:
+            # Ensure directory exists
+            ensure_dir(slides_dir)
+            
+            save_path = slides_dir / f"{paper_id}_slides.pdf"
+            logger.info(f"Downloading slides to: {save_path}")
+            
+            # First, scroll the Studio panel to reveal generated items
+            try:
+                studio_panel = self.page.locator('[class*="studio"], [class*="right-panel"]').first
+                if studio_panel.count() > 0:
+                    studio_panel.evaluate("el => el.scrollTop = el.scrollHeight")
+                    time.sleep(1)
+            except Exception:
+                pass
+            
+            # Find the slides artifact item - it should have "演示文稿" or slides icon
+            # Look for artifacts that are PDF type (not video)
+            more_clicked = False
+            
+            # We need to find the slides artifact, not the video artifact
+            # Try to locate by looking for PDF-related elements
+            try:
+                # Look for slides/presentation artifacts by icon or text
+                slides_artifacts = self.page.locator('[class*="artifact"]:has-text("演示文稿"), [class*="artifact"]:has-text("Slides")')
+                if slides_artifacts.count() > 0:
+                    # Find the more button within this artifact
+                    artifact = slides_artifacts.first
+                    more_btn = artifact.locator('button[aria-label="更多"], button.artifact-more-button')
+                    if more_btn.count() > 0 and more_btn.first.is_visible():
+                        more_btn.first.click()
+                        time.sleep(1)
+                        more_clicked = True
+                        logger.debug("Clicked more button on slides artifact")
+            except Exception as e:
+                logger.debug(f"Could not find slides artifact directly: {e}")
+            
+            # If we couldn't find slides artifact specifically, try all artifacts
+            # and look for PDF download option
+            if not more_clicked:
+                try:
+                    more_buttons = self.page.locator('button.artifact-more-button[aria-label="更多"]')
+                    # Try clicking each one and check for PDF download option
+                    for i in range(min(more_buttons.count(), 3)):  # Check up to 3 artifacts
+                        btn = more_buttons.nth(i)
+                        if btn.is_visible():
+                            btn.click()
+                            time.sleep(0.5)
+                            # Check if this menu has PDF or slides related text
+                            menu = self.page.locator('[role="menu"]')
+                            if menu.count() > 0:
+                                menu_text = menu.first.text_content() or ""
+                                # If this is not the video menu (no .mp4), could be slides
+                                if "下载" in menu_text and i > 0:  # Second or later artifact
+                                    more_clicked = True
+                                    logger.debug(f"Found potential slides artifact at index {i}")
+                                    break
+                                else:
+                                    # Close this menu and try next
+                                    self.page.keyboard.press("Escape")
+                                    time.sleep(0.3)
+                except Exception as e:
+                    logger.debug(f"Failed to find slides artifact: {e}")
+            
+            if not more_clicked:
+                logger.warning("Could not find slides artifact to download")
+                return None
+            
+            # Click the "下载" (Download) menu item
+            with self.page.expect_download(timeout=120000) as download_info:
+                try:
+                    time.sleep(0.5)
+                    download_item = self.page.get_by_role("menuitem", name="下载")
+                    if download_item.count() > 0 and download_item.first.is_visible():
+                        download_item.first.click()
+                        logger.debug("Clicked 下载 menu item for slides")
+                    else:
+                        download_item = self.page.locator('.mat-mdc-menu-item:has-text("下载")')
+                        if download_item.count() > 0:
+                            download_item.first.click()
+                        else:
+                            logger.error("Could not find download menu item for slides")
+                            return None
+                except Exception as e:
+                    logger.error(f"Failed to click download for slides: {e}")
+                    return None
+            
+            download = download_info.value
+            download.save_as(str(save_path))
+            
+            logger.info(f"Slides downloaded: {save_path}")
+            return save_path
+            
+        except Exception as e:
+            logger.error(f"Failed to download slides: {e}")
+            self.take_screenshot("slides_download_failed")
+            return None
+    
     def process_paper(
         self,
         paper_id: str,
@@ -1200,7 +1382,11 @@ def upload_papers_for_week(
                 if not bot.generate_video_overview():
                     logger.warning(f"Could not trigger video generation for {paper.paper_id}")
                 
-                # Update status to UPLOADED (video is generating)
+                # Also trigger slides/presentation generation
+                if not bot.generate_slides():
+                    logger.warning(f"Could not trigger slides generation for {paper.paper_id}")
+                
+                # Update status to UPLOADED (video and slides are generating)
                 upsert_paper(
                     paper_id=paper.paper_id,
                     week_id=week_id,
@@ -1208,7 +1394,7 @@ def upload_papers_for_week(
                     status=Status.NBLM_OK  # Use NBLM_OK to indicate uploaded
                 )
                 
-                logger.info(f"Successfully uploaded and triggered video for: {paper.paper_id}")
+                logger.info(f"Successfully uploaded and triggered video+slides for: {paper.paper_id}")
                 success += 1
                 
             except Exception as e:
@@ -1426,11 +1612,20 @@ def download_videos_for_week(
                     failure += 1
                     continue
                 
-                # Update status to VIDEO_OK with actual downloaded path
+                # Also try to download slides if available
+                slides_dir = ensure_dir(SLIDES_DIR / get_period_subdir(week_id))
+                slides_result = bot.download_slides(paper.paper_id, slides_dir)
+                if slides_result:
+                    logger.info(f"Successfully downloaded slides for: {paper.paper_id}")
+                else:
+                    logger.debug(f"No slides found for {paper.paper_id} (this is optional)")
+                
+                # Update status to VIDEO_OK with actual downloaded paths
                 upsert_paper(
                     paper_id=paper.paper_id,
                     week_id=week_id,
                     video_path=str(result),
+                    slides_path=str(slides_result) if slides_result else None,
                     status=Status.VIDEO_OK
                 )
                 

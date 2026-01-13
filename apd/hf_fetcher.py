@@ -340,7 +340,16 @@ def fetch_daily_papers(
         # Check if paper already exists in DB
         existing = get_paper(paper_id)
         if existing:
-            logger.debug(f"Paper {paper_id} already in database")
+            # Paper exists - check if it's for a different date/week
+            if existing.week_id != date_id:
+                logger.info(f"Paper {paper_id} exists with week_id {existing.week_id}, updating to {date_id}")
+                # Update the week_id to match current date so download can find it
+                upsert_paper(
+                    paper_id=paper_id,
+                    week_id=date_id,
+                )
+            else:
+                logger.debug(f"Paper {paper_id} already in database for this date")
             all_papers.append(paper)
             continue
         
@@ -399,7 +408,15 @@ def fetch_weekly_papers(
             # Check if paper already exists in DB
             existing = get_paper(paper_id)
             if existing:
-                logger.debug(f"Paper {paper_id} already in database")
+                # Paper exists - check if it's for a different week
+                if existing.week_id != week_id:
+                    logger.info(f"Paper {paper_id} exists with week_id {existing.week_id}, updating to {week_id}")
+                    upsert_paper(
+                        paper_id=paper_id,
+                        week_id=week_id,
+                    )
+                else:
+                    logger.debug(f"Paper {paper_id} already in database for this week")
                 all_papers.append(paper)
                 continue
             
@@ -442,7 +459,15 @@ def fetch_weekly_papers(
                 # Check if paper already exists in DB
                 existing = get_paper(paper_id)
                 if existing:
-                    logger.debug(f"Paper {paper_id} already in database")
+                    # Paper exists - check if it's for a different week
+                    if existing.week_id != week_id:
+                        logger.info(f"Paper {paper_id} exists with week_id {existing.week_id}, updating to {week_id}")
+                        upsert_paper(
+                            paper_id=paper_id,
+                            week_id=week_id,
+                        )
+                    else:
+                        logger.debug(f"Paper {paper_id} already in database for this week")
                     all_papers.append(paper)
                     continue
                 
