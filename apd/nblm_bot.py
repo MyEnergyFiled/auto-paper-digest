@@ -369,7 +369,8 @@ class NotebookLMBot:
                 # Strategy 2: Need to trigger the file dialog first
                 # Look for "选择文件" (Select file) link or upload button
                 select_file_selectors = [
-                    'text=选择文件',  # Chinese: Select file
+                    'text=选择文件',  # Chinese: Select file (link in upload dialog)
+                    'a:text("选择文件")',  # Link format
                     'text=Select file',
                     'text=Choose file', 
                     'a:has-text("选择")',
@@ -378,6 +379,11 @@ class NotebookLMBot:
                     '[class*="upload"] button',
                     'text=Upload',
                     'text=上传',
+                    # New patterns for upload dialog
+                    'text=上传来源',  # Upload source
+                    '[class*="dropzone"] a',
+                    '[role="dialog"] a:text("选择")',
+                    '[role="dialog"] text=选择文件',
                 ]
                 
                 clicked = False
@@ -405,6 +411,11 @@ class NotebookLMBot:
                         '[class*="upload-area"]',
                         'text=拖放或',  # Chinese: Drag and drop or
                         'text=Drag',
+                        # New patterns for dialog upload zone
+                        'text=上传来源',  # Upload source icon/text
+                        '[role="dialog"] [class*="upload"]',
+                        # The upload icon area
+                        '[class*="source"] [class*="upload"]',
                     ]
                     
                     for selector in upload_zone_selectors:
@@ -512,6 +523,78 @@ class NotebookLMBot:
         logger.warning("Ingestion wait timeout")
         self.take_screenshot("ingestion_timeout")
         return False
+    
+    def extract_summary(self) -> Optional[str]:
+        """
+        Extract the auto-generated summary from the chat/dialogue area.
+        
+        NotebookLM automatically generates a summary after PDF is uploaded.
+        This summary appears as the first message in the dialogue area.
+        
+        Returns:
+            The summary text, or None if extraction failed
+        """
+        logger.info("Extracting summary from NotebookLM...")
+        
+        try:
+            # Wait a moment for content to be fully rendered
+            time.sleep(2)
+            
+            # The summary is the first response in the dialogue area
+            # It's usually in a highlighted/colored block
+            
+            # Method 1: Look for the summary block with yellow/highlighted background
+            try:
+                # The summary appears in a div with specific styling
+                summary_blocks = self.page.locator('[class*="response"], [class*="message"], [class*="chat"] p')
+                if summary_blocks.count() > 0:
+                    # Get all text from the first substantial block
+                    for i in range(min(summary_blocks.count(), 5)):
+                        block = summary_blocks.nth(i)
+                        text = block.text_content()
+                        if text and len(text) > 100:  # Substantial content
+                            summary = text.strip()
+                            logger.info(f"Extracted summary ({len(summary)} chars)")
+                            return summary
+            except Exception as e:
+                logger.debug(f"Method 1 failed: {e}")
+            
+            # Method 2: Look for main content area
+            try:
+                main_area = self.page.locator('[class*="main"] [class*="content"]')
+                if main_area.count() > 0:
+                    text = main_area.first.text_content()
+                    if text and len(text) > 100:
+                        # Clean up the text - remove suggested questions etc.
+                        summary = text.strip()
+                        # Limit to reasonable length
+                        if len(summary) > 1000:
+                            summary = summary[:1000] + "..."
+                        logger.info(f"Extracted summary from main area ({len(summary)} chars)")
+                        return summary
+            except Exception as e:
+                logger.debug(f"Method 2 failed: {e}")
+            
+            # Method 3: Try to get any substantial text in the dialogue section
+            try:
+                dialogue = self.page.locator('text=/本文|这篇|该论文|这项研究/')
+                if dialogue.count() > 0:
+                    parent = dialogue.first.locator('xpath=ancestor::div[contains(@class, "content") or contains(@class, "message")]')
+                    if parent.count() > 0:
+                        summary = parent.first.text_content()
+                        if summary and len(summary) > 50:
+                            logger.info(f"Extracted summary via text pattern ({len(summary)} chars)")
+                            return summary.strip()
+            except Exception as e:
+                logger.debug(f"Method 3 failed: {e}")
+            
+            logger.warning("Could not extract summary")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to extract summary: {e}")
+            self.take_screenshot("summary_extraction_failed")
+            return None
     
     def navigate_to_studio(self) -> bool:
         """
@@ -1375,6 +1458,11 @@ def upload_papers_for_week(
                 # Rename notebook (in case it was created with default name)
                 bot.rename_notebook(notebook_name)
                 
+                # Extract summary from the auto-generated dialogue
+                summary = bot.extract_summary()
+                if summary:
+                    logger.info(f"Extracted summary for {paper.paper_id}: {summary[:100]}...")
+                
                 # Navigate to Studio and trigger video generation
                 if not bot.navigate_to_studio():
                     logger.warning(f"Could not navigate to Studio for {paper.paper_id}")
@@ -1391,6 +1479,7 @@ def upload_papers_for_week(
                     paper_id=paper.paper_id,
                     week_id=week_id,
                     notebooklm_note_name=notebook_name,
+                    summary=summary,  # Save extracted summary
                     status=Status.NBLM_OK  # Use NBLM_OK to indicate uploaded
                 )
                 

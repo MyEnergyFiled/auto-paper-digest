@@ -66,6 +66,17 @@ def show_papers(week):
 <p><a href="{slides_url}" target="_blank" style="display:inline-block; padding:8px 16px; background:#10b981; color:white; border-radius:6px; text-decoration:none; margin:10px 0;">📊 Download Slides (PDF)</a></p>
 """
         
+        # Get summary if available
+        summary = p.get('summary', '')
+        summary_html = ""
+        if summary:
+            # Truncate if too long for display
+            display_summary = summary[:500] + "..." if len(summary) > 500 else summary
+            summary_html = f"""
+> 📝 **摘要**: {display_summary}
+
+"""
+        
         result += f"""
 ## {i}. {p.get('title', 'Untitled')}
 
@@ -73,7 +84,7 @@ def show_papers(week):
 
 [📄 PDF]({p.get('pdf_url', '#')}) | [🤗 HuggingFace Paper]({p.get('hf_url', '#')})
 
-{video_html}
+{summary_html}{video_html}
 {slides_html}
 ---
 """

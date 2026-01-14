@@ -246,6 +246,7 @@ def publish_week(
                 "video_url": video_url,
                 "video_filename": video_path.name,
                 "slides_url": slides_url,
+                "summary": paper.summary,  # NotebookLM auto-generated summary
                 "published_at": datetime.now().isoformat(),
             }
             

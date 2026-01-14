@@ -277,24 +277,43 @@ class DouyinBot:
         if not title_filled:
             logger.warning("Could not fill title field - continuing anyway")
         
-        # 4. Dismiss popups again before filling tags
+        # 4. Dismiss popups again before filling description
         self.dismiss_popups()
         
-        # 5. Fill hashtags/tags
+        # 5. Fill description in the main text area (the area with #添加话题 @好友)
+        # Douyin's description is entered in the same area as tags, before the hashtags
+        logger.info("Filling description...")
+        if description:
+            try:
+                # Click on the description/tag area first
+                desc_area = self.page.locator('text="#添加话题"').first
+                if desc_area.is_visible(timeout=3000):
+                    desc_area.click()
+                    self.page.wait_for_timeout(300)
+                    
+                    # Type the description (limit to reasonable length for Douyin)
+                    truncated_desc = description[:800] if len(description) > 800 else description
+                    self.page.keyboard.type(truncated_desc)
+                    self.page.wait_for_timeout(300)
+                    
+                    # Add a newline before tags
+                    self.page.keyboard.press("Enter")
+                    self.page.wait_for_timeout(200)
+                    
+                    logger.info(f"Description filled ({len(truncated_desc)} chars)")
+                else:
+                    logger.warning("Description area not found")
+            except Exception as e:
+                logger.warning(f"Could not fill description: {e}")
+        
+        # 6. Fill hashtags/tags
         logger.info("Filling tags...")
         if tags:
             try:
-                # Look for the hashtag input area - it shows "#添加话题 @好友"
-                tag_area = self.page.locator('text="#添加话题"').first
-                if tag_area.is_visible(timeout=3000):
-                    tag_area.click()
-                    self.page.wait_for_timeout(300)
-                    
-                    for tag in tags:
-                        self.page.keyboard.type(f"#{tag} ")
-                        self.page.wait_for_timeout(500)
-                else:
-                    logger.warning("Tag input area not found")
+                # Tags are added after description in the same area
+                for tag in tags:
+                    self.page.keyboard.type(f"#{tag} ")
+                    self.page.wait_for_timeout(500)
             except Exception as e:
                 logger.warning(f"Could not fill tags: {e}")
 
