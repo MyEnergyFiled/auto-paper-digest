@@ -31,7 +31,16 @@ def get_weeks():
     return sorted(w, reverse=True) if w else ["No data"]
 
 
+def refresh_weeks():
+    """Refresh the week dropdown choices."""
+    weeks = get_weeks()
+    return gr.Dropdown(choices=weeks, value=weeks[0] if weeks else None)
+
+
 def show_papers(week):
+    if not week or week == "No data":
+        return "No papers available. Please select a week."
+    
     m = load_metadata()
     papers = m.get("weeks", {}).get(week, [])
     
@@ -91,14 +100,29 @@ def show_papers(week):
     return result
 
 
-# Simple Interface
-demo = gr.Interface(
-    fn=show_papers,
-    inputs=gr.Dropdown(choices=get_weeks(), label="📅 Select Week", value=get_weeks()[0] if get_weeks() else None),
-    outputs=gr.Markdown(label="Papers"),
-    title="📚 Paper Digest Portal",
-    description="Weekly AI/ML paper video overviews powered by NotebookLM. Videos play directly in browser!",
-    allow_flagging="never",
-)
+# Use Blocks for more control over UI updates
+with gr.Blocks(title="📚 Paper Digest Portal") as demo:
+    gr.Markdown("# 📚 Paper Digest Portal")
+    gr.Markdown("Weekly AI/ML paper video overviews powered by NotebookLM. Videos play directly in browser!")
+    
+    with gr.Row():
+        week_dropdown = gr.Dropdown(
+            choices=get_weeks(), 
+            label="📅 Select Week", 
+            value=get_weeks()[0] if get_weeks() else None,
+            scale=4
+        )
+        refresh_btn = gr.Button("🔄 Refresh Weeks", scale=1)
+    
+    output = gr.Markdown(label="Papers")
+    
+    # Event handlers
+    week_dropdown.change(fn=show_papers, inputs=week_dropdown, outputs=output)
+    refresh_btn.click(fn=refresh_weeks, outputs=week_dropdown)
+    
+    # Auto-refresh week list every 5 minutes (300 seconds) to pick up new weeks
+    # Also refresh on page load
+    demo.load(fn=refresh_weeks, outputs=week_dropdown, every=300)
+    demo.load(fn=show_papers, inputs=week_dropdown, outputs=output)
 
 demo.launch()

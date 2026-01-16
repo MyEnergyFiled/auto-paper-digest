@@ -4,10 +4,11 @@ Database module for Auto Paper Digest.
 Provides SQLite-based paper tracking with status management.
 """
 
+import re
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -15,6 +16,67 @@ from .config import DB_PATH, Status
 from .utils import get_logger, now_iso
 
 logger = get_logger()
+
+
+def _is_week_format(period_id: str) -> bool:
+    """Check if period_id is week format (YYYY-WW) vs date format (YYYY-MM-DD)."""
+    # Week format: 2026-03 (4 digits, dash, 2 digits)
+    # Date format: 2026-01-15 (4 digits, dash, 2 digits, dash, 2 digits)
+    return bool(re.match(r'^\d{4}-\d{2}$', period_id))
+
+
+def _get_dates_for_week(week_id: str) -> list[str]:
+    """
+    Get all dates (YYYY-MM-DD) for a given week.
+    
+    Args:
+        week_id: Week identifier (e.g., "2026-03")
+        
+    Returns:
+        List of date strings for that week (Monday to Sunday)
+    """
+    parts = week_id.split("-")
+    if len(parts) != 2:
+        return []
+    
+    year, week = int(parts[0]), int(parts[1])
+    
+    # Get the Monday of the given ISO week
+    jan4 = datetime(year, 1, 4)
+    start_of_week1 = jan4 - timedelta(days=jan4.weekday())
+    monday = start_of_week1 + timedelta(weeks=week - 1)
+    
+    # Generate all 7 days of the week
+    dates = []
+    for i in range(7):
+        day = monday + timedelta(days=i)
+        dates.append(day.strftime("%Y-%m-%d"))
+    
+    return dates
+
+
+def _build_week_id_clause(week_id: str) -> tuple[str, list]:
+    """
+    Build SQL clause for week_id matching.
+    
+    If week_id is in week format (YYYY-WW), matches both the week format
+    and all daily dates within that week.
+    
+    Args:
+        week_id: Week or date identifier
+        
+    Returns:
+        Tuple of (SQL clause, parameters list)
+    """
+    if _is_week_format(week_id):
+        # Match both week format and all daily dates in that week
+        dates = _get_dates_for_week(week_id)
+        all_ids = [week_id] + dates
+        placeholders = ",".join("?" * len(all_ids))
+        return f"week_id IN ({placeholders})", all_ids
+    else:
+        # Just match the exact value
+        return "week_id = ?", [week_id]
 
 
 # =============================================================================
@@ -313,8 +375,9 @@ def list_papers(
         params: list = []
         
         if week_id:
-            query += " AND week_id = ?"
-            params.append(week_id)
+            clause, clause_params = _build_week_id_clause(week_id)
+            query += f" AND {clause}"
+            params.extend(clause_params)
         if status:
             query += " AND status = ?"
             params.append(status)
@@ -349,8 +412,9 @@ def count_papers(week_id: Optional[str] = None, status: Optional[str] = None) ->
         params: list = []
         
         if week_id:
-            query += " AND week_id = ?"
-            params.append(week_id)
+            clause, clause_params = _build_week_id_clause(week_id)
+            query += f" AND {clause}"
+            params.extend(clause_params)
         if status:
             query += " AND status = ?"
             params.append(status)
@@ -389,20 +453,23 @@ def get_papers_for_processing(
     with get_connection() as conn:
         cursor = conn.cursor()
         
-        placeholders = ",".join("?" * len(needed_statuses))
+        # Build week_id clause for smart matching
+        week_clause, week_params = _build_week_id_clause(week_id)
+        
+        status_placeholders = ",".join("?" * len(needed_statuses))
         query = f"""
             SELECT * FROM papers 
-            WHERE week_id = ? 
-            AND status IN ({placeholders})
+            WHERE {week_clause}
+            AND status IN ({status_placeholders})
             AND retry_count < ?
             ORDER BY paper_id
         """
         
+        params = week_params + needed_statuses + [max_retries]
+        
         if limit:
             query += " LIMIT ?"
-            params = [week_id] + needed_statuses + [max_retries, limit]
-        else:
-            params = [week_id] + needed_statuses + [max_retries]
+            params.append(limit)
         
         cursor.execute(query, params)
         rows = cursor.fetchall()
