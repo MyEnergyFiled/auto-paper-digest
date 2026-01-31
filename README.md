@@ -18,7 +18,7 @@
   <tr>
     <td align="center">
       <h3>📱 Hugging Face 论文解读</h3>
-      <img src="douyin.jpg" alt="抖音二维码" width="280"/>
+      <img src="dy.jpg" alt="抖音二维码" width="280"/>
       <br>
       <sub>扫码关注，第一时间获取精彩内容</sub>
     </td>
