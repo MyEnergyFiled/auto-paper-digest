@@ -198,6 +198,16 @@ apd download-video --date 2026-01-08 --headful
 apd publish-douyin --date 2026-01-08 --headful
 ```
 
+## 📄 按论文处理（可选）
+```bash
+
+# 下载指定视频
+apd download-video --paper_id 2601.19375 --headful
+
+# 发布指定视频到抖音
+apd publish-douyin --paper_id 2601.19375 --headful
+```
+
 > ⚠️ **注意**：周末和节假日没有论文，系统会提示错误而非继续处理。
 
 ### 文件夹结构
