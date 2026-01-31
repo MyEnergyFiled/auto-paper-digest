@@ -465,6 +465,11 @@ def upload(
     help="Date (e.g., 2026-01-08). Download videos for a specific date."
 )
 @click.option(
+    "--paper-id", "-p",
+    default=None,
+    help="Download video for a specific paper ID (e.g., 2501.12345)"
+)
+@click.option(
     "--headful",
     is_flag=True,
     help="Run browser in visible mode"
@@ -484,67 +489,86 @@ def upload(
 def download_video(
     week: Optional[str],
     date: Optional[str],
+    paper_id: Optional[str],
     headful: bool,
     max_papers: Optional[int],
     force: bool
 ) -> None:
     """
     Download generated videos from NotebookLM.
-    
+
     Use --week for weekly papers or --date for a specific date.
-    
+    Use --paper-id to download a specific paper's video.
+
     Phase 2 of the two-phase workflow:
     1. Opens NotebookLM home page
-    2. Finds notebooks with {period_id}_ prefix
+    2. Finds notebooks with {period_id}_ prefix (or specific paper_id)
     3. Checks if video is ready for each
     4. Downloads completed videos
-    
+
     Run this after 'apd upload' and waiting for videos to generate.
     """
     from .nblm_bot import download_videos_for_week
-    
+    from .db import get_paper
+
     logger = get_logger()
     headless = not headful
-    
+
     # Validate mutually exclusive options
     if week and date:
         click.echo("❌ Error: --week and --date are mutually exclusive. Use one or the other.", err=True)
         sys.exit(1)
-    
-    # Determine period_id (date or week)
-    if date:
-        period_id = date
-        period_type = "date"
+
+    # If paper_id is specified, get its week_id from database
+    if paper_id:
+        paper = get_paper(paper_id)
+        if not paper:
+            click.echo(f"❌ Paper not found: {paper_id}", err=True)
+            sys.exit(1)
+        period_id = paper.week_id
+        period_type = "paper"
+        click.echo(f"📥 Downloading video for paper {paper_id}...")
     else:
-        period_id = week or get_current_week_id()
-        period_type = "week"
-    
+        # Determine period_id (date or week)
+        if date:
+            period_id = date
+            period_type = "date"
+        else:
+            period_id = week or get_current_week_id()
+            period_type = "week"
+
+        try:
+            # Check how many papers are awaiting download
+            awaiting = count_papers(week_id=period_id, status=Status.NBLM_OK)
+            video_ok = count_papers(week_id=period_id, status=Status.VIDEO_OK)
+
+            if awaiting == 0 and (video_ok == 0 or not force):
+                click.echo(f"⚠️  No papers awaiting video download for {period_type} {period_id}")
+                if video_ok > 0:
+                    click.echo(f"   ({video_ok} videos already downloaded. Use --force to re-download)")
+                else:
+                    click.echo("   Run 'apd upload' first to upload PDFs to NotebookLM.")
+                return
+
+            total = awaiting + (video_ok if force else 0)
+            click.echo(f"📥 Downloading videos for {total} papers in {period_type} {period_id}...")
+            if force and video_ok > 0:
+                click.echo(f"   (--force: will re-check {video_ok} already downloaded videos)")
+            click.echo()
+        except Exception as e:
+            logger.exception("Failed to check paper status")
+            click.echo(f"❌ Error checking status: {e}", err=True)
+            sys.exit(1)
+
     try:
-        # Check how many papers are awaiting download
-        awaiting = count_papers(week_id=period_id, status=Status.NBLM_OK)
-        video_ok = count_papers(week_id=period_id, status=Status.VIDEO_OK)
-        
-        if awaiting == 0 and (video_ok == 0 or not force):
-            click.echo(f"⚠️  No papers awaiting video download for {period_type} {period_id}")
-            if video_ok > 0:
-                click.echo(f"   ({video_ok} videos already downloaded. Use --force to re-download)")
-            else:
-                click.echo("   Run 'apd upload' first to upload PDFs to NotebookLM.")
-            return
-        
-        total = awaiting + (video_ok if force else 0)
-        click.echo(f"📥 Downloading videos for {total} papers in {period_type} {period_id}...")
-        if force and video_ok > 0:
-            click.echo(f"   (--force: will re-check {video_ok} already downloaded videos)")
-        click.echo()
-        
         success, failure, skipped = download_videos_for_week(
             week_id=period_id,
             headless=headless,
             max_papers=max_papers,
-            force=force
+            force=force,
+            paper_id=paper_id
         )
-        
+
         click.echo()
         result_msg = f"✅ Download complete: {success} success, {failure} failed"
         if skipped > 0:

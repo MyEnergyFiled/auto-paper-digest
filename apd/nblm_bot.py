@@ -904,12 +904,19 @@ class NotebookLMBot:
     def _get_artifact_title(self) -> Optional[str]:
         """
         Get the title of the generated video/audio artifact from the Studio panel.
-        
+
         Returns:
             The artifact title, or None if not found
         """
         try:
-            # Look for artifact button content which contains the title
+            # Look for title-container > artifact-title which contains the title
+            title_elem = self.page.locator('.title-container > .artifact-title')
+            if title_elem.count() > 0:
+                title = title_elem.first.text_content()
+                if title:
+                    return title.strip()
+
+            # Fallback: look for artifact button content which contains the title
             artifact = self.page.locator('.artifact-button-content')
             if artifact.count() > 0:
                 # The title is in a span inside the button
@@ -919,7 +926,7 @@ class NotebookLMBot:
                     if title:
                         # Clean up the title for use as filename
                         return title.strip()
-            
+
             # Fallback: look for generated item with timestamp
             items = self.page.locator('[class*="artifact"]')
             for i in range(min(3, items.count())):
@@ -931,39 +938,41 @@ class NotebookLMBot:
                         return lines[0].strip()
         except Exception as e:
             logger.debug(f"Failed to get artifact title: {e}")
-        
+
         return None
     
-    def download_video(self, paper_id: str, video_dir: Path) -> Optional[Path]:
+    def download_video(self, paper_id: str, video_dir: Path) -> tuple[Optional[Path], Optional[str]]:
         """
         Download the generated video.
-        
+
         In the new NotebookLM UI, download is accessed via the three-dot menu
         on the generated item, then clicking "下载" (Download).
-        
+
         The video is saved with filename format: {paper_id}_{video_title}.mp4
-        
+
         Args:
             paper_id: The paper ID (used as filename prefix)
             video_dir: Directory to save the video file
-            
+
         Returns:
-            Path to downloaded video, or None on failure
+            Tuple of (Path to downloaded video, artifact title), or (None, None) on failure
         """
         try:
             # Ensure directory exists
             ensure_dir(video_dir)
-            
+
             # Get the artifact title for the filename
             artifact_title = self._get_artifact_title()
+            logger.info(f"artifact_title: {artifact_title}")
             if artifact_title:
                 # Sanitize the title for use as filename
                 safe_title = sanitize_filename(artifact_title)
                 save_path = video_dir / f"{paper_id}_{safe_title}.mp4"
             else:
                 # Fallback to paper_id only
+                artifact_title = None
                 save_path = video_dir / f"{paper_id}.mp4"
-            
+
             logger.info(f"Downloading video to: {save_path}")
             
             # First, scroll the Studio panel to reveal generated items
@@ -1087,14 +1096,14 @@ class NotebookLMBot:
             
             download = download_info.value
             download.save_as(str(save_path))
-            
+
             logger.info(f"Video downloaded: {save_path}")
-            return save_path
-            
+            return save_path, artifact_title
+
         except Exception as e:
             logger.error(f"Failed to download video: {e}")
             self.take_screenshot("download_failed")
-            return None
+            return None, None
     
     def download_slides(self, paper_id: str, slides_dir: Path) -> Optional[Path]:
         """
@@ -1502,38 +1511,47 @@ def download_videos_for_week(
     headless: bool = True,
     max_papers: Optional[int] = None,
     force: bool = False,
+    paper_id: Optional[str] = None,
 ) -> tuple[int, int, int]:
     """
     Download generated videos for a week from NotebookLM.
-    
+
     This is Phase 2 of the two-phase workflow:
     1. Go to NotebookLM home page
-    2. Find all notebooks with prefix {week_id}_
+    2. Find all notebooks with prefix {week_id}_ (or specific paper_id)
     3. For each notebook, check if video is ready
     4. If ready, download the video
-    
+
     Implements caching: if video file already exists, skip download unless force=True.
-    
+
     Args:
         week_id: Week identifier (e.g., "2026-02")
         headless: Run browser in headless mode
         max_papers: Maximum papers to process
         force: Force re-download even if video exists
-        
+        paper_id: Optional specific paper ID to download
+
     Returns:
         Tuple of (success_count, failure_count, skipped_count)
     """
-    from .db import list_papers
-    
-    # Get papers that have been uploaded (NBLM_OK) or already have video (VIDEO_OK if force)
-    papers_nblm = list_papers(week_id=week_id, status=Status.NBLM_OK)
-    papers_video = list_papers(week_id=week_id, status=Status.VIDEO_OK) if force else []
-    
-    papers = papers_nblm + papers_video
-    
-    if max_papers:
-        papers = papers[:max_papers]
-    
+    from .db import get_paper, list_papers
+
+    # If paper_id is specified, only process that paper
+    if paper_id:
+        paper = get_paper(paper_id)
+        if not paper:
+            logger.error(f"Paper not found: {paper_id}")
+            return 0, 1, 0
+        papers = [paper]
+    else:
+        # Get papers that have been uploaded (NBLM_OK) or already have video (VIDEO_OK if force)
+        papers_nblm = list_papers(week_id=week_id, status=Status.NBLM_OK)
+        papers_video = list_papers(week_id=week_id, status=Status.VIDEO_OK) if force else []
+        papers = papers_nblm + papers_video
+
+        if max_papers:
+            papers = papers[:max_papers]
+
     if not papers:
         logger.info(f"No papers awaiting video download in week {week_id}")
         return 0, 0, 0
@@ -1694,13 +1712,28 @@ def download_videos_for_week(
                 
                 # Download video
                 video_dir = ensure_dir(VIDEO_DIR / get_period_subdir(week_id))
-                
-                result = bot.download_video(paper.paper_id, video_dir)
+
+                result, artifact_title = bot.download_video(paper.paper_id, video_dir)
                 if not result:
                     logger.error(f"Failed to download video for {paper.paper_id}")
                     failure += 1
                     continue
-                
+
+                # Rename video file and keep .mp4 suffix
+                final_video_path = result
+                if artifact_title:
+                    # Rename file: {paper_id}_{title}.mp4 -> {paper_id}_{title}.mp4 (keep suffix)
+                    old_path = result
+                    new_path = result.parent / f"{paper.paper_id}_{artifact_title}.mp4"
+                    try:
+                        if old_path.exists():
+                            old_path.rename(new_path)
+                            final_video_path = new_path
+                            logger.info(f"Renamed video file: {old_path.name} -> {new_path.name}")
+                    except Exception as e:
+                        logger.warning(f"Failed to rename video file: {e}")
+                        final_video_path = result
+
                 # Also try to download slides if available
                 slides_dir = ensure_dir(SLIDES_DIR / get_period_subdir(week_id))
                 slides_result = bot.download_slides(paper.paper_id, slides_dir)
@@ -1708,12 +1741,13 @@ def download_videos_for_week(
                     logger.info(f"Successfully downloaded slides for: {paper.paper_id}")
                 else:
                     logger.debug(f"No slides found for {paper.paper_id} (this is optional)")
-                
-                # Update status to VIDEO_OK with actual downloaded paths
+
+                # Update status to VIDEO_OK with actual downloaded paths and title
                 upsert_paper(
                     paper_id=paper.paper_id,
                     week_id=week_id,
-                    video_path=str(result),
+                    title=artifact_title,
+                    video_path=str(final_video_path),
                     slides_path=str(slides_result) if slides_result else None,
                     status=Status.VIDEO_OK
                 )
