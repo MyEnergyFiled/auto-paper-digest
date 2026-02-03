@@ -671,13 +671,14 @@ class NotebookLMBot:
                             summary_option = self.page.get_by_text("摘要", exact=True)
                             if summary_option.count() > 0 and summary_option.first.is_visible():
                                 summary_option.first.click()
-                                time.sleep(1)
+                                time.sleep(2)
                                 logger.info("Clicked 摘要 option")
 
                                 try:
                                     generate_btn = self.page.get_by_role("button", name="生成")
                                     if generate_btn.count() > 0 and generate_btn.first.is_visible():
                                         generate_btn.first.click()
+                                        time.sleep(1)
                                         logger.info("Clicked 生成 button in dialog")
                                 except Exception:
                                     pass  # No dialog, generation started directly
