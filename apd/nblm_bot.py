@@ -1419,6 +1419,7 @@ def upload_papers_for_week(
     max_papers: Optional[int] = None,
     force: bool = False,
     use_summary: bool = False,
+    generate_slides: bool = True,
 ) -> tuple[int, int]:
     """
     Upload all PDFs for a week to NotebookLM and trigger video generation.
@@ -1435,6 +1436,7 @@ def upload_papers_for_week(
         max_papers: Maximum papers to process
         force: Force re-upload even if already done (process PDF_OK, NBLM_OK, VIDEO_OK)
         use_summary: If True, use custom video overview (摘要 mode); otherwise use standard video overview
+        generate_slides: If True, also generate slides/presentation
 
     Returns:
         Tuple of (success_count, failure_count)
@@ -1513,8 +1515,11 @@ def upload_papers_for_week(
                     logger.warning(f"Could not trigger video generation for {paper.paper_id}")
                 
                 # Also trigger slides/presentation generation
-                if not bot.generate_slides():
-                    logger.warning(f"Could not trigger slides generation for {paper.paper_id}")
+                if generate_slides:
+                    if not bot.generate_slides():
+                        logger.warning(f"Could not trigger slides generation for {paper.paper_id}")
+                else:
+                    logger.info(f"Skipping slides generation for {paper.paper_id} (--no-slides)")
                 
                 # Update status to UPLOADED (video and slides are generating)
                 upsert_paper(

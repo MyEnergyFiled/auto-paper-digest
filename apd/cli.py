@@ -342,13 +342,19 @@ def nblm(
     is_flag=True,
     help="Use custom video overview (摘要 mode) instead of standard video overview"
 )
+@click.option(
+    "--no-slides",
+    is_flag=True,
+    help="Skip slides generation"
+)
 def upload(
     week: Optional[str],
     date: Optional[str],
     headful: bool,
     max_papers: int,
     force: bool,
-    summary: bool
+    summary: bool,
+    no_slides: bool
 ) -> None:
     """
     Phase 1: Fetch papers, download PDFs, upload to NotebookLM, trigger video generation.
@@ -427,7 +433,8 @@ def upload(
             headless=headless,
             max_papers=max_papers,
             force=force,
-            use_summary=summary
+            use_summary=summary,
+            generate_slides=not no_slides
         )
         
         # Summary
