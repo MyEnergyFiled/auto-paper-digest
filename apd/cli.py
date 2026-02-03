@@ -337,12 +337,18 @@ def nblm(
     is_flag=True,
     help="Force re-processing even if already done"
 )
+@click.option(
+    "--summary",
+    is_flag=True,
+    help="Use custom video overview (摘要 mode) instead of standard video overview"
+)
 def upload(
     week: Optional[str],
     date: Optional[str],
     headful: bool,
     max_papers: int,
-    force: bool
+    force: bool,
+    summary: bool
 ) -> None:
     """
     Phase 1: Fetch papers, download PDFs, upload to NotebookLM, trigger video generation.
@@ -420,7 +426,8 @@ def upload(
             week_id=period_id,
             headless=headless,
             max_papers=max_papers,
-            force=force
+            force=force,
+            use_summary=summary
         )
         
         # Summary

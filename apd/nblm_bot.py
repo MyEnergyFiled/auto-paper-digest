@@ -638,48 +638,79 @@ class NotebookLMBot:
             logger.error(f"Failed to check Studio panel: {e}")
             return True  # Return True to continue even on error
     
-    def generate_video_overview(self, steering_prompt: Optional[str] = None) -> bool:
+    def generate_video_overview(self, steering_prompt: Optional[str] = None, use_summary: bool = False) -> bool:
         """
         Generate a Video Overview.
-        
+
         In the new NotebookLM UI, clicking the "视频概览" (Video Overview) card
         directly triggers generation.
-        
+
         Args:
             steering_prompt: Optional prompt to guide the overview content
-            
+            use_summary: If True, use custom video overview (自定义视频概览 with 摘要 option);
+                         If False, use standard video overview (视频概览)
+
         Returns:
             True if generation started successfully
         """
-        logger.info("Starting Video Overview generation...")
-        
+        logger.info(f"Starting Video Overview generation... (use_summary={use_summary})")
+
         try:
             # Wait for page to stabilize
             time.sleep(2)
-            
-            # Method 1: Click on the "视频概览" (Video Overview) card
-            # This directly triggers generation in the new UI
-            try:
-                video_card = self.page.get_by_text("视频概览", exact=True)
-                if video_card.count() > 0 and video_card.first.is_visible():
-                    video_card.first.click()
-                    time.sleep(1)
-                    logger.info("Clicked on 视频概览 card")
-                    
-                    # Check if a dialog appeared asking for customization
-                    # If so, click the generate button
-                    try:
-                        generate_btn = self.page.get_by_role("button", name="生成")
-                        if generate_btn.count() > 0 and generate_btn.first.is_visible():
-                            generate_btn.first.click()
-                            logger.info("Clicked 生成 button in dialog")
-                    except Exception:
-                        pass  # No dialog, generation started directly
-                    
-                    logger.info("Video Overview generation started")
-                    return True
-            except Exception as e:
-                logger.debug(f"Failed to click 视频概览: {e}")
+
+            if use_summary:
+                # Click on 自定义视频概览 card
+                try:
+                    option_icon = self.page.locator('[aria-label="自定义视频概览"]')
+                    if option_icon.count() > 0 and option_icon.first.is_visible():
+                        option_icon.first.click()
+                        time.sleep(1)
+                        logger.info("Clicked on 自定义视频概览 card")
+                        try:
+                            summary_option = self.page.get_by_text("摘要", exact=True)
+                            if summary_option.count() > 0 and summary_option.first.is_visible():
+                                summary_option.first.click()
+                                time.sleep(1)
+                                logger.info("Clicked 摘要 option")
+
+                                try:
+                                    generate_btn = self.page.get_by_role("button", name="生成")
+                                    if generate_btn.count() > 0 and generate_btn.first.is_visible():
+                                        generate_btn.first.click()
+                                        logger.info("Clicked 生成 button in dialog")
+                                except Exception:
+                                    pass  # No dialog, generation started directly
+                        except Exception as e:
+                            pass
+
+                        logger.info("Summary video generation started")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Failed to generate summary video: {e}")
+            else:
+                # Click on standard 视频概览 card
+                try:
+                    video_card = self.page.get_by_text("视频概览", exact=True)
+                    if video_card.count() > 0 and video_card.first.is_visible():
+                        video_card.first.click()
+                        time.sleep(1)
+                        logger.info("Clicked on 视频概览 card")
+
+                        # Check if a dialog appeared asking for customization
+                        # If so, click the generate button
+                        try:
+                            generate_btn = self.page.get_by_role("button", name="生成")
+                            if generate_btn.count() > 0 and generate_btn.first.is_visible():
+                                generate_btn.first.click()
+                                logger.info("Clicked 生成 button in dialog")
+                        except Exception:
+                            pass  # No dialog, generation started directly
+
+                        logger.info("Video Overview generation started")
+                        return True
+                except Exception as e:
+                    logger.debug(f"Failed to click 视频概览: {e}")
             
             # Method 2: Try English text
             try:
@@ -1387,22 +1418,24 @@ def upload_papers_for_week(
     headless: bool = True,
     max_papers: Optional[int] = None,
     force: bool = False,
+    use_summary: bool = False,
 ) -> tuple[int, int]:
     """
     Upload all PDFs for a week to NotebookLM and trigger video generation.
-    
+
     This is Phase 1 of the two-phase workflow:
     1. Create notebook with name format: {week_id}_{paper_id}
     2. Upload PDF and wait for ingestion
     3. Trigger video generation (don't wait for completion)
     4. Move to next paper
-    
+
     Args:
         week_id: Week identifier (e.g., "2026-02")
         headless: Run browser in headless mode
         max_papers: Maximum papers to process
         force: Force re-upload even if already done (process PDF_OK, NBLM_OK, VIDEO_OK)
-        
+        use_summary: If True, use custom video overview (摘要 mode); otherwise use standard video overview
+
     Returns:
         Tuple of (success_count, failure_count)
     """
@@ -1476,7 +1509,7 @@ def upload_papers_for_week(
                 if not bot.navigate_to_studio():
                     logger.warning(f"Could not navigate to Studio for {paper.paper_id}")
                 
-                if not bot.generate_video_overview():
+                if not bot.generate_video_overview(use_summary=use_summary):
                     logger.warning(f"Could not trigger video generation for {paper.paper_id}")
                 
                 # Also trigger slides/presentation generation

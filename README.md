@@ -248,6 +248,7 @@ https://huggingface.co/spaces/your-username/paper-digest
 --headful      显示浏览器窗口（调试时使用）
 --force, -f    强制重新处理（忽略缓存）
 --debug        开启调试日志
+--summary      生成视频摘要(2-3分钟的短视频)
 ```
 
 ---
